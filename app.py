@@ -254,9 +254,9 @@ def main():
                 break
 
 
-
-if __name__ == '__main__':
-    main()
+main()
+# if __name__ == '__main__':
+#     main()
     #  wsl
     #  sudo service redis-server start
     #  streamlit run main.py
