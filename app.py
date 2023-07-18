@@ -11,11 +11,47 @@ import time
 import redis
 from collections import deque
 import altair as alt
-import random
+import random,os
 import plotly.express as px
 import json
 from collections import Counter
+import twilio
+from twilio.rest import Client
+import logging
+import random
+import configparser
 
+logger = logging.getLogger(__name__)
+
+# @st.experimental_memo
+@st.cache_data
+def get_ice_servers():
+    """Use Twilio's TURN server because Streamlit Community Cloud has changed
+    its infrastructure and WebRTC connection cannot be established without TURN server now.  # noqa: E501
+    We considered Open Relay Project (https://www.metered.ca/tools/openrelay/) too,
+    but it is not stable and hardly works as some people reported like https://github.com/aiortc/aiortc/issues/832#issuecomment-1482420656  # noqa: E501
+    See https://github.com/whitphx/streamlit-webrtc/issues/1213
+    """
+    # Ref: https://www.twilio.com/docs/stun-turn/api
+
+    stun_servers = ["stun.l.google.com:19302","stun1.l.google.com:19302","stun2.l.google.com:19302","stun4.l.google.com:19302",
+        "stun01.sipphone.com","stun.ekiga.net","stun.fwdnet.net","stun.ideasip.com","stun.iptel.org","stun.rixtelecom.se","stun.schlund.de",
+        "stunserver.org","stun.softjoys.com","stun.voiparound.com","stun.voipbuster.com", "stun.voipstunt.com","stun.voxgratia.org","stun.xten.com" ]
+
+    config = configparser.ConfigParser()
+    config.read(os.path.join(os.path.dirname(__file__), 'config.ini'))
+    try:
+        account_sid = config.get('Twilio', 'ACCOUNT_SID')
+        auth_token = config.get('Twilio', 'AUTH_TOKEN')
+        client = Client(account_sid, auth_token)
+        token = client.tokens.create()
+        return token.ice_servers
+    except (configparser.NoOptionError, twilio.base.exceptions.TwilioRestException):
+        logger.warning(
+            "Twilio credentials are not set or there was an error connecting to Twilio. Fallback to a free STUN server from Google."  # noqa: E501
+        )
+        chosen_stun_server = random.choice(stun_servers)
+        return [{"urls": [f"stun:{chosen_stun_server}"]}]
 
 # Create a Redis connection
 r = redis.Redis(host='localhost', port=6379, db=0)
@@ -188,7 +224,8 @@ def main():
             ctx = webrtc_streamer(key=f"camera_{i + 1}",
                                   video_processor_factory=lambda: det_processors[i],
                                   video_frame_callback=det_processors[i].recv,
-                                  media_stream_constraints={"video": True, "audio": False})
+                                  media_stream_constraints={"video": True, "audio": False},
+                                  rtc_configuration={"iceServers": get_ice_servers()})
 
     accumulate = st.sidebar.checkbox('Accumulate data', value=True)
     WINDOW_SIZE = int(st.sidebar.number_input('que_windows(each data~0.5sec)', min_value = 1 ,max_value=120 ,value =60,step=1))
@@ -226,4 +263,3 @@ if __name__ == '__main__':
     #  streamlit run main.py --server.enableCORS true --server.address 192.168.99.253 --server.port 8501
     #  ssl-proxy-windows-amd64.exe -from 0.0.0.0:443 -to localhost:8501
     #  ssl-proxy-windows-amd64.exe -from 192.168.99.253:8501 -to localhost:8501
-
